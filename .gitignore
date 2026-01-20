@@ -14,7 +14,6 @@ cmake-build-*/
 *.vst
 
 # Installer artifacts
-*.dmg
 installer_package/
 
 # macOS
