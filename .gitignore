@@ -1,0 +1,27 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE files
+.idea/
+.vscode/
+*.xcodeproj/
+*.xcworkspace/
+
+# Compiled plugins (use releases for distribution)
+*.component
+*.vst3
+*.vst
+
+# Installer artifacts
+*.dmg
+installer_package/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Temporary files
+*.tmp
+*.log
