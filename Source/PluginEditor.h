@@ -3,63 +3,67 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-/**
- * Tape Death Plugin Editor
- *
- * Knob-based interface with organized parameter groups
- */
-class TapeDeathAudioProcessorEditor : public juce::AudioProcessorEditor
+class TapeDeathAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                      private juce::Timer
 {
 public:
-    TapeDeathAudioProcessorEditor(TapeDeathAudioProcessor&);
+    explicit TapeDeathAudioProcessorEditor(TapeDeathAudioProcessor&);
     ~TapeDeathAudioProcessorEditor() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
 
 private:
-    TapeDeathAudioProcessor& audioProcessor;
+    class MonoPlateLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
+                              float sliderPosProportional, float rotaryStartAngle,
+                              float rotaryEndAngle, juce::Slider& slider) override;
+    };
 
-    // Custom font for labels
-    juce::Typeface::Ptr labelTypeface;
-
-    // Logo image
-    juce::Image logoImage;
-
-    // Labels
-    juce::Label titleLabel;
-    juce::Label primaryLabel;
-    juce::Label characterLabel;
-    juce::Label filtersLabel;
-
-    // Knobs and their attachments
     struct KnobWithLabel
     {
         juce::Slider slider;
         juce::Label label;
+        juce::Label value;
+        juce::String paramId;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
 
-    // Degradation controls (4 knobs)
+    TapeDeathAudioProcessor& audioProcessor;
+    MonoPlateLookAndFeel monoLookAndFeel;
+    juce::Rectangle<int> diagramBounds;
+    juce::Typeface::Ptr instrumentSerifRegular;
+    juce::Typeface::Ptr instrumentSerifItalic;
+    juce::Typeface::Ptr jetBrainsMono;
+    float visualActivity = 0.0f;
+    float reelPhase = 0.0f;
+    float tapeTravel = 0.0f;
+    int signalHoldFrames = 0;
+
     KnobWithLabel amountKnob;
     KnobWithLabel damageKnob;
     KnobWithLabel toneKnob;
     KnobWithLabel harshnessKnob;
-
-    // Character controls (4 knobs)
     KnobWithLabel saturationKnob;
     KnobWithLabel warbleKnob;
     KnobWithLabel noiseKnob;
     KnobWithLabel ageKnob;
-
-    // Output controls (3 knobs)
     KnobWithLabel loCutKnob;
     KnobWithLabel hiCutKnob;
     KnobWithLabel dryWetKnob;
 
-    // Helper to setup a knob
+    void timerCallback() override;
     void setupKnob(KnobWithLabel& knob, const juce::String& paramId,
                    const juce::String& labelText, juce::AudioProcessorValueTreeState& params);
+    void drawHeader(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawDiagram(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawSection(juce::Graphics& g, juce::Rectangle<int> bounds, const juce::String& title,
+                     const juce::String& subtitle);
+    void positionControl(KnobWithLabel& knob, juce::Rectangle<int> bounds);
+    void updateReadouts();
+    juce::String formatParameterValue(const juce::String& paramId) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TapeDeathAudioProcessorEditor)
 };

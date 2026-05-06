@@ -48,14 +48,19 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState& getParameters() { return parameters; }
+    float getAudioActivity() const { return audioActivity.load(); }
 
 private:
     // DSP engines (one per channel for stereo independence)
     TapeDeathEngine engineLeft;
     TapeDeathEngine engineRight;
 
+    // Smoother for the dry/wet mix (per-sample read kills automation zipper)
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> dryWetSmoother;
+
     // Parameter tree
     juce::AudioProcessorValueTreeState parameters;
+    std::atomic<float> audioActivity { 0.0f };
 
     // Create parameter layout
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();

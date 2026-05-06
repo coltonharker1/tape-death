@@ -15,6 +15,7 @@ cmake-build-*/
 
 # Installer artifacts
 installer_package/
+*.dmg.zip
 
 # macOS
 .DS_Store

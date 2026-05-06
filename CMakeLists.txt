@@ -33,6 +33,9 @@ juce_generate_juce_header(TapeDeath)
 juce_add_binary_data(TapeDeathBinaryData
     SOURCES
         Source/Fonts/XXII\ Ultimate-Black-Metal.ttf
+        Source/Fonts/InstrumentSerif-Regular.ttf
+        Source/Fonts/InstrumentSerif-Italic.ttf
+        Source/Fonts/JetBrainsMono-Regular.ttf
         Source/Images/tape\ death\ 2.png)
 
 # Source files

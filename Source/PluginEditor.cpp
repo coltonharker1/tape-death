@@ -2,68 +2,110 @@
 #include "PluginEditor.h"
 #include "BinaryData.h"
 
+namespace
+{
+constexpr juce::uint32 paper = 0xfff4f1ea;
+constexpr juce::uint32 ink = 0xff000000;
+constexpr juce::uint32 quietInk = 0xaa000000;
+constexpr juce::uint32 faintInk = 0x12000000;
+
+juce::FontOptions monoFont(juce::Typeface::Ptr typeface, float height)
+{
+    return juce::FontOptions(typeface).withHeight(height);
+}
+
+juce::FontOptions serifFont(juce::Typeface::Ptr typeface, float height)
+{
+    return juce::FontOptions(typeface).withHeight(height);
+}
+}
+
 TapeDeathAudioProcessorEditor::TapeDeathAudioProcessorEditor(TapeDeathAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p)
 {
-    // Load custom font for labels
-    labelTypeface = juce::Typeface::createSystemTypefaceFor(
-        BinaryData::XXII_UltimateBlackMetal_ttf,
-        BinaryData::XXII_UltimateBlackMetal_ttfSize);
+    instrumentSerifRegular = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::InstrumentSerifRegular_ttf,
+        BinaryData::InstrumentSerifRegular_ttfSize);
+    instrumentSerifItalic = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::InstrumentSerifItalic_ttf,
+        BinaryData::InstrumentSerifItalic_ttfSize);
+    jetBrainsMono = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::JetBrainsMonoRegular_ttf,
+        BinaryData::JetBrainsMonoRegular_ttfSize);
 
-    // Load logo image
-    logoImage = juce::ImageCache::getFromMemory(
-        BinaryData::tape_death_2_png,
-        BinaryData::tape_death_2_pngSize);
-
-    // Section labels (hidden - drawn in paint())
-    titleLabel.setVisible(false);
-    primaryLabel.setVisible(false);
-    characterLabel.setVisible(false);
-    filtersLabel.setVisible(false);
-
-    // Setup all knobs
     auto& params = audioProcessor.getParameters();
 
-    // Degradation controls (4 knobs)
-    setupKnob(amountKnob, "amount", "Damage", params);
+    setupKnob(amountKnob, "amount", "Loss", params);
     setupKnob(damageKnob, "damage", "Rot", params);
-    setupKnob(toneKnob, "tone", "Darkness", params);
-    setupKnob(harshnessKnob, "harshness", "Violence", params);
-
-    // Character controls (4 knobs)
-    setupKnob(saturationKnob, "saturation", "Saturation", params);
+    setupKnob(harshnessKnob, "harshness", "Snap", params);
     setupKnob(warbleKnob, "warble", "Warble", params);
-    setupKnob(noiseKnob, "noise", "Noise", params);
     setupKnob(ageKnob, "age", "Age", params);
-
-    // Output controls (3 knobs)
+    setupKnob(saturationKnob, "saturation", "Saturation", params);
+    setupKnob(noiseKnob, "noise", "Noise", params);
+    setupKnob(toneKnob, "tone", "Darkness", params);
     setupKnob(loCutKnob, "loCut", "Lo-Cut", params);
     setupKnob(hiCutKnob, "hiCut", "Hi-Cut", params);
     setupKnob(dryWetKnob, "dryWet", "Dry/Wet", params);
 
-    setSize(520, 240);
+    updateReadouts();
+    startTimerHz(30);
+    setSize(760, 500);
 }
 
 TapeDeathAudioProcessorEditor::~TapeDeathAudioProcessorEditor()
 {
+    stopTimer();
+
+    for (auto* child : getChildren())
+        if (auto* slider = dynamic_cast<juce::Slider*>(child))
+            slider->setLookAndFeel(nullptr);
+}
+
+void TapeDeathAudioProcessorEditor::timerCallback()
+{
+    const float processorActivity = audioProcessor.getAudioActivity();
+    if (processorActivity > 0.018f)
+        signalHoldFrames = 28;
+    else if (signalHoldFrames > 0)
+        --signalHoldFrames;
+
+    const float targetActivity = signalHoldFrames > 0 ? juce::jmax(processorActivity, 0.28f) : processorActivity;
+    visualActivity += (targetActivity - visualActivity) * (targetActivity > visualActivity ? 0.22f : 0.08f);
+
+    const float motion = visualActivity * visualActivity;
+    reelPhase = std::fmod(reelPhase - motion * 0.19f, juce::MathConstants<float>::twoPi);
+    tapeTravel = std::fmod(tapeTravel + motion * 0.058f, 1.0f);
+
+    updateReadouts();
+    repaint(diagramBounds);
 }
 
 void TapeDeathAudioProcessorEditor::setupKnob(KnobWithLabel& knob, const juce::String& paramId,
-                                                 const juce::String& labelText,
-                                                 juce::AudioProcessorValueTreeState& params)
+                                             const juce::String& labelText,
+                                             juce::AudioProcessorValueTreeState& params)
 {
+    knob.paramId = paramId;
+
     knob.slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     knob.slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    knob.slider.setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xff666666));
-    knob.slider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff333333));
-    knob.slider.setColour(juce::Slider::thumbColourId, juce::Colours::white);
+    knob.slider.setRotaryParameters(juce::MathConstants<float>::pi * 0.75f,
+                                    juce::MathConstants<float>::pi * 2.25f,
+                                    true);
+    knob.slider.setMouseDragSensitivity(180);
+    knob.slider.setLookAndFeel(&monoLookAndFeel);
+    knob.slider.onValueChange = [this] { updateReadouts(); repaint(diagramBounds); };
     addAndMakeVisible(knob.slider);
 
     knob.label.setText(labelText.toUpperCase(), juce::dontSendNotification);
-    knob.label.setJustificationType(juce::Justification::centredTop);
-    knob.label.setColour(juce::Label::textColourId, juce::Colour(0xff888888));
-    knob.label.setFont(juce::FontOptions(10.0f));
+    knob.label.setJustificationType(juce::Justification::centred);
+    knob.label.setColour(juce::Label::textColourId, juce::Colour(quietInk));
+    knob.label.setFont(monoFont(jetBrainsMono, 8.0f));
     addAndMakeVisible(knob.label);
+
+    knob.value.setJustificationType(juce::Justification::centred);
+    knob.value.setColour(juce::Label::textColourId, juce::Colour(quietInk));
+    knob.value.setFont(serifFont(instrumentSerifItalic, 14.0f));
+    addAndMakeVisible(knob.value);
 
     knob.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         params, paramId, knob.slider);
@@ -71,110 +113,462 @@ void TapeDeathAudioProcessorEditor::setupKnob(KnobWithLabel& knob, const juce::S
 
 void TapeDeathAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    // Dark background
-    g.fillAll(juce::Colour(0xff121212));
+    auto bounds = getLocalBounds();
+    g.fillAll(juce::Colour(paper));
 
-    // Draw logo image in top right corner
-    if (logoImage.isValid())
+    drawHeader(g, bounds.removeFromTop(58));
+
+    g.setColour(juce::Colour(ink));
+    g.drawRect(bounds, 1);
+
+    drawDiagram(g, diagramBounds);
+
+    auto controls = bounds.removeFromBottom(162).reduced(18, 0);
+    const int gap = 10;
+    const int sectionW = (controls.getWidth() - gap * 3) / 4;
+
+    auto damage = controls.removeFromLeft(sectionW);
+    controls.removeFromLeft(gap);
+    auto motion = controls.removeFromLeft(sectionW);
+    controls.removeFromLeft(gap);
+    auto material = controls.removeFromLeft(sectionW);
+    controls.removeFromLeft(gap);
+    auto output = controls;
+
+    drawSection(g, damage, "Dropouts", "loss / rot / snap");
+    drawSection(g, motion, "Motion", "pitch drift");
+    drawSection(g, material, "Material", "oxide grain");
+    drawSection(g, output, "Output", "print blend");
+}
+
+void TapeDeathAudioProcessorEditor::drawHeader(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    auto header = bounds.reduced(22, 0);
+
+    g.setColour(juce::Colour(ink));
+    g.setFont(serifFont(instrumentSerifItalic, 36.0f));
+    g.drawText("Tape Death", header.removeFromLeft(250), juce::Justification::centredLeft);
+
+    g.setFont(monoFont(jetBrainsMono, 9.0f));
+    g.drawText("PLATE XI - MAGNETIC DECAY / LISTEN FIRST", header, juce::Justification::centredRight);
+
+    g.drawLine(0.0f, static_cast<float>(bounds.getBottom()) - 0.5f,
+               static_cast<float>(getWidth()), static_cast<float>(bounds.getBottom()) - 0.5f, 1.5f);
+}
+
+void TapeDeathAudioProcessorEditor::drawDiagram(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    if (bounds.isEmpty())
+        return;
+
+    auto& params = audioProcessor.getParameters();
+    const auto get = [&params](const char* id)
     {
-        int imgWidth = 180;
-        int imgHeight = static_cast<int>(imgWidth * (float)logoImage.getHeight() / logoImage.getWidth());
-        int imgX = getWidth() - imgWidth;
-        int imgY = 15;
-        g.drawImage(logoImage, imgX, imgY, imgWidth, imgHeight,
-                    0, 0, logoImage.getWidth(), logoImage.getHeight());
+        if (auto* p = params.getRawParameterValue(id))
+            return p->load();
+        return 0.0f;
+    };
+
+    const float amount = get("amount") / 100.0f;
+    const float rot = get("damage") / 100.0f;
+    const float violence = get("harshness") / 100.0f;
+    const float warble = get("warble") / 100.0f;
+    const float age = get("age") / 100.0f;
+    const float noise = get("noise") / 100.0f;
+    const float sat = get("saturation") / 100.0f;
+
+    g.setColour(juce::Colour(faintInk));
+    for (int x = bounds.getX(); x < bounds.getRight(); x += 34)
+        for (int y = bounds.getY(); y < bounds.getBottom(); y += 34)
+            g.fillEllipse(static_cast<float>(x), static_cast<float>(y), 1.0f, 1.0f);
+
+    auto plate = bounds.reduced(72, 34);
+    auto cassette = plate.withSizeKeepingCentre(juce::jmin(plate.getWidth(), 560), 170);
+    g.setColour(juce::Colour(ink));
+    g.drawRect(cassette.toFloat(), 1.4f);
+
+    auto innerPlate = cassette.reduced(18, 16);
+    g.drawRect(innerPlate.toFloat(), 0.75f);
+
+    for (auto corner : { innerPlate.getTopLeft(), innerPlate.getTopRight(),
+                         innerPlate.getBottomLeft(), innerPlate.getBottomRight() })
+    {
+        g.drawEllipse(static_cast<float>(corner.x) - 3.0f, static_cast<float>(corner.y) - 3.0f,
+                      6.0f, 6.0f, 0.7f);
     }
 
-    // Use custom font for section labels
-    g.setFont(juce::FontOptions(labelTypeface).withHeight(48.0f));
-    int lineY;
+    g.setFont(monoFont(jetBrainsMono, 7.5f));
+    auto topText = innerPlate.reduced(10, 0).removeFromTop(22);
+    g.drawText("MAGNETIC DECAY", topText, juce::Justification::centredLeft);
+    g.drawText("LISTEN FIRST", topText, juce::Justification::centredRight);
 
-    // DEGRADATION - left aligned over the knobs
-    lineY = 22;
+    const float reelR = 42.0f;
+    const float reelY = static_cast<float>(cassette.getY()) + 72.0f;
+    const float lcx = static_cast<float>(cassette.getX()) + 150.0f;
+    const float rcx = static_cast<float>(cassette.getRight()) - 150.0f;
+    const float lowerY = static_cast<float>(cassette.getBottom()) - 24.0f;
+    const float leftGuideX = static_cast<float>(cassette.getX()) + 46.0f;
+    const float rightGuideX = static_cast<float>(cassette.getRight()) - 46.0f;
+    const float guideR = 7.0f;
+    const float tapeAlpha = 1.0f - age * 0.58f;
+    const float ribbonWidth = 5.6f;
+    const float signalWidth = 1.05f + sat * 0.7f;
+
+    g.setColour(juce::Colour(ink).withAlpha(0.18f));
+    g.drawLine(static_cast<float>(cassette.getX()) + 62.0f, lowerY + 17.0f,
+               static_cast<float>(cassette.getRight()) - 62.0f, lowerY + 17.0f, 0.8f);
+    g.drawLine(leftGuideX + 22.0f, lowerY + 10.0f, leftGuideX + 92.0f, lowerY + 10.0f, 0.7f);
+    g.drawLine(rightGuideX - 92.0f, lowerY + 10.0f, rightGuideX - 22.0f, lowerY + 10.0f, 0.7f);
+
+    auto drawReel = [&](float cx, float phase)
     {
-        juce::String label = "Degradation";
-        int labelWidth = g.getCurrentFont().getStringWidth(label) + 20;
-        int labelCenter = 155;  // Center of the 4 degradation knobs (same as character)
-        int labelX = labelCenter - labelWidth / 2;
-        int lineEndX = 310;  // Where the image area begins
+        g.setColour(juce::Colour(paper));
+        g.fillEllipse(cx - reelR, reelY - reelR, reelR * 2.0f, reelR * 2.0f);
+        g.setColour(juce::Colour(ink));
+        g.drawEllipse(cx - reelR, reelY - reelR, reelR * 2.0f, reelR * 2.0f, 1.3f);
+        g.drawEllipse(cx - reelR * 0.72f, reelY - reelR * 0.72f, reelR * 1.44f, reelR * 1.44f, 0.75f);
+        g.drawEllipse(cx - reelR * 0.46f, reelY - reelR * 0.46f, reelR * 0.92f, reelR * 0.92f, 0.75f);
+        g.drawEllipse(cx - 6.0f, reelY - 6.0f, 12.0f, 12.0f, 0.9f);
 
-        g.setColour(juce::Colour(0xff3a3a3a));
-        g.drawLine(15, lineY, labelX - 8, lineY, 1.0f);
-        g.drawLine(labelX + labelWidth + 8, lineY, lineEndX, lineY, 1.0f);
+        for (int i = 0; i < 8; ++i)
+        {
+            const float a = phase + juce::MathConstants<float>::twoPi * static_cast<float>(i) / 8.0f;
+            g.drawLine(cx, reelY, cx + std::cos(a) * (reelR - 11.0f),
+                       reelY + std::sin(a) * (reelR - 11.0f), 0.8f);
+        }
+    };
 
-        g.setColour(juce::Colour(0xffcc5500));  // Orange
-        g.drawText(label, labelX, lineY - 20, labelWidth, 40, juce::Justification::centred);
+    struct TapePoint
+    {
+        float x;
+        float y;
+    };
+
+    const TapePoint leftReelExit { lcx - reelR * 0.98f, reelY + reelR * 0.30f };
+    const TapePoint leftGuide { leftGuideX, lowerY - guideR };
+    const TapePoint rightGuide { rightGuideX, lowerY - guideR };
+    const TapePoint rightReelEntry { rcx + reelR * 0.98f, reelY + reelR * 0.30f };
+
+    auto drawRibbonSegment = [&](TapePoint a, TapePoint b, float alpha)
+    {
+        const float dx = b.x - a.x;
+        const float dy = b.y - a.y;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0.0f)
+            return;
+
+        const auto n = juce::Point<float>(-dy / len, dx / len) * (ribbonWidth * 0.5f);
+        juce::Path segment;
+        segment.startNewSubPath(a.x + n.x, a.y + n.y);
+        segment.lineTo(b.x + n.x, b.y + n.y);
+        segment.lineTo(b.x - n.x, b.y - n.y);
+        segment.lineTo(a.x - n.x, a.y - n.y);
+        segment.closeSubPath();
+
+        g.setColour(juce::Colour(ink).withAlpha(alpha * 0.10f));
+        g.fillPath(segment);
+        g.setColour(juce::Colour(ink).withAlpha(alpha * 0.14f));
+        g.strokePath(segment, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+    };
+
+    drawRibbonSegment(leftReelExit, leftGuide, tapeAlpha);
+    drawRibbonSegment(rightGuide, rightReelEntry, tapeAlpha);
+
+    std::array<TapePoint, 96> activeTapePoints;
+    for (size_t i = 0; i < activeTapePoints.size(); ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(activeTapePoints.size() - 1);
+        const float x = leftGuide.x + (rightGuide.x - leftGuide.x) * t;
+        const float sag = std::sin(t * juce::MathConstants<float>::pi) * (amount * 2.2f);
+        const float flutter = std::sin(t * 11.0f + tapeTravel * juce::MathConstants<float>::twoPi * visualActivity) * warble * 1.7f;
+        activeTapePoints[i] = { x, lowerY - guideR + sag + flutter };
     }
 
-    // Row 2 divider - CHARACTER on left, OUTPUT on right
-    lineY = 135;
-    int charOutputDivide = 310;  // Where character ends and output begins
-
-    // CHARACTER - left section (4 knobs: 15 + 70*3 + 60 = ~285, center around 155)
+    auto normalAt = [&activeTapePoints](size_t i)
     {
-        juce::String label = "Character";
-        int labelWidth = g.getCurrentFont().getStringWidth(label) + 20;
-        int charCenter = 155;  // Center of the 4 character knobs
-        int labelX = charCenter - labelWidth / 2;
+        const auto prev = activeTapePoints[i == 0 ? 0 : i - 1];
+        const auto next = activeTapePoints[juce::jmin(i + 1, activeTapePoints.size() - 1)];
+        const float dx = next.x - prev.x;
+        const float dy = next.y - prev.y;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0.0f)
+            return juce::Point<float>(0.0f, 1.0f);
 
-        g.setColour(juce::Colour(0xff3a3a3a));
-        g.drawLine(15, lineY, labelX - 8, lineY, 1.0f);
-        g.drawLine(labelX + labelWidth + 8, lineY, charOutputDivide - 15, lineY, 1.0f);
+        return juce::Point<float>(-dy / len, dx / len);
+    };
 
-        g.setColour(juce::Colour(0xffcc5500));  // Orange (same as Degradation)
-        g.drawText(label, labelX, lineY - 20, labelWidth, 40, juce::Justification::centred);
+    juce::Path ribbon;
+    for (size_t i = 0; i < activeTapePoints.size(); ++i)
+    {
+        const auto n = normalAt(i);
+        const auto p = juce::Point<float>(activeTapePoints[i].x, activeTapePoints[i].y) + n * (ribbonWidth * 0.5f);
+
+        if (i == 0)
+            ribbon.startNewSubPath(p);
+        else
+            ribbon.lineTo(p);
+    }
+    for (size_t i = activeTapePoints.size(); i-- > 0;)
+    {
+        const auto n = normalAt(i);
+        const auto p = juce::Point<float>(activeTapePoints[i].x, activeTapePoints[i].y) - n * (ribbonWidth * 0.5f);
+        ribbon.lineTo(p);
+    }
+    ribbon.closeSubPath();
+
+    g.setColour(juce::Colour(ink).withAlpha(tapeAlpha * 0.10f));
+    g.fillPath(ribbon);
+    g.setColour(juce::Colour(ink).withAlpha(tapeAlpha * 0.14f));
+    g.strokePath(ribbon, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+
+    g.setColour(juce::Colour(paper));
+    g.fillEllipse(leftGuideX - guideR, lowerY - guideR * 2.0f, guideR * 2.0f, guideR * 2.0f);
+    g.fillEllipse(rightGuideX - guideR, lowerY - guideR * 2.0f, guideR * 2.0f, guideR * 2.0f);
+    g.setColour(juce::Colour(ink));
+    g.drawEllipse(leftGuideX - guideR, lowerY - guideR * 2.0f, guideR * 2.0f, guideR * 2.0f, 0.9f);
+    g.drawEllipse(rightGuideX - guideR, lowerY - guideR * 2.0f, guideR * 2.0f, guideR * 2.0f, 0.9f);
+    const int notchCount = static_cast<int>(std::round(amount * (2.0f + violence * 10.0f)));
+    auto notchDepthAt = [notchCount, rot, violence, travel = tapeTravel](float t)
+    {
+        float depth = 0.0f;
+
+        for (int n = 0; n < notchCount; ++n)
+        {
+            float centre = 0.08f + static_cast<float>((n * 37) % 85) / 100.0f + travel;
+            centre -= std::floor(centre);
+            const float halfWidth = 0.012f + rot * 0.026f + static_cast<float>((n * 11) % 5) * 0.002f;
+            const float rawDistance = std::abs(t - centre);
+            const float d = juce::jmin(rawDistance, 1.0f - rawDistance);
+
+            if (d < halfWidth)
+            {
+                const float x = d / halfWidth;
+                const float soft = x * x * (3.0f - 2.0f * x);
+                const float hard = x < 0.82f ? 0.0f : (x - 0.82f) / 0.18f;
+                const float profile = juce::jmap(violence, soft, hard);
+                depth = juce::jmax(depth, juce::jlimit(0.0f, 1.0f, 1.0f - profile) * (0.24f + rot * 0.76f));
+            }
+        }
+
+        return depth;
+    };
+
+    for (size_t i = 1; i < activeTapePoints.size(); ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(activeTapePoints.size() - 1);
+        const float prevT = static_cast<float>(i - 1) / static_cast<float>(activeTapePoints.size() - 1);
+        const float depth = juce::jmax(notchDepthAt(prevT), notchDepthAt(t));
+        const float localAlpha = tapeAlpha * juce::jlimit(0.10f, 1.0f, 1.0f - depth * (0.86f + rot * 0.12f));
+        const float localWidth = juce::jmax(0.38f, signalWidth * (1.0f - depth * 0.34f));
+
+        g.setColour(juce::Colour(ink).withAlpha(localAlpha));
+        g.drawLine(activeTapePoints[i - 1].x, activeTapePoints[i - 1].y,
+                   activeTapePoints[i].x, activeTapePoints[i].y, localWidth);
     }
 
-    // OUTPUT - right section (3 knobs at 310, 380, 450, center around 410)
+    const int speckleCount = static_cast<int>(noise * 120.0f);
+    if (speckleCount > 0)
     {
-        juce::String label = "Output";
-        int labelWidth = g.getCurrentFont().getStringWidth(label) + 20;
-        int outputCenter = 410;  // Center of the 3 output knobs
-        int labelX = outputCenter - labelWidth / 2;
+        g.setColour(juce::Colour(ink).withAlpha(0.24f + noise * 0.26f));
 
-        g.setColour(juce::Colour(0xff3a3a3a));
-        g.drawLine(charOutputDivide + 15, lineY, labelX - 8, lineY, 1.0f);
-        g.drawLine(labelX + labelWidth + 8, lineY, getWidth() - 15, lineY, 1.0f);
+        for (int i = 0; i < speckleCount; ++i)
+        {
+            const int travelOffset = static_cast<int>(tapeTravel * static_cast<float>(activeTapePoints.size() - 2));
+            const size_t idx = static_cast<size_t>((i * 29 + travelOffset) % static_cast<int>(activeTapePoints.size() - 2)) + 1;
+            const auto prev = activeTapePoints[idx - 1];
+            const auto next = activeTapePoints[idx + 1];
+            const float dx = next.x - prev.x;
+            const float dy = next.y - prev.y;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            const float nx = len > 0.0f ? -dy / len : 0.0f;
+            const float ny = len > 0.0f ? dx / len : 1.0f;
+            const float along = static_cast<float>((i * 13) % 9 - 4) * 0.45f;
+            const float lift = static_cast<float>((i * 31) % 7 - 3) * (0.42f + noise * 0.38f);
+            const float x = activeTapePoints[idx].x + (len > 0.0f ? dx / len : 1.0f) * along + nx * lift;
+            const float y = activeTapePoints[idx].y + (len > 0.0f ? dy / len : 0.0f) * along + ny * lift;
 
-        g.setColour(juce::Colour(0xffcc5500));  // Orange (same as Degradation)
-        g.drawText(label, labelX, lineY - 20, labelWidth, 40, juce::Justification::centred);
+            if (i % 7 == 0)
+                g.drawLine(x - nx * 1.9f, y - ny * 1.9f, x + nx * 1.9f, y + ny * 1.9f, 0.75f);
+            else
+                g.fillRect(juce::Rectangle<float>(x, y, 1.2f, 1.2f));
+        }
     }
+
+    drawReel(lcx, reelPhase);
+    drawReel(rcx, reelPhase * 0.86f + 0.4f);
+
+    g.setColour(juce::Colour(ink));
+    g.setFont(monoFont(jetBrainsMono, 8.0f));
+    auto ledger = bounds.reduced(14, 8).removeFromTop(18);
+    g.drawText("OXIDE MAP", ledger, juce::Justification::centredLeft);
+
+    juce::String condition = "STABLE";
+    if (amount + rot + violence > 2.0f)
+        condition = "BREAKING";
+    else if (amount + rot + violence > 1.2f)
+        condition = "FRAYED";
+    else if (amount + rot + violence > 0.5f)
+        condition = "WORN";
+
+    juce::String motion = "STEADY";
+    if (warble > 0.65f)
+        motion = "ADRIFT";
+    else if (warble > 0.24f)
+        motion = "WAVERING";
+
+    g.drawText(condition + " / " + motion, ledger, juce::Justification::centredRight);
 }
 
 void TapeDeathAudioProcessorEditor::resized()
 {
-    const int knobSize = 60;
-    const int labelHeight = 24;
-    const int knobSpacing = 75;
+    auto bounds = getLocalBounds();
+    bounds.removeFromTop(58);
+    diagramBounds = bounds.reduced(18, 18);
+    diagramBounds.removeFromBottom(172);
 
-    auto positionKnob = [&](KnobWithLabel& knob, int x, int y, int size = 60) {
-        knob.slider.setBounds(x, y, size, size);
-        knob.label.setBounds(x - 15, y + size, size + 30, labelHeight);
+    auto controls = bounds.removeFromBottom(162).reduced(18, 0);
+    const int gap = 10;
+    const int sectionW = (controls.getWidth() - gap * 3) / 4;
+
+    auto damage = controls.removeFromLeft(sectionW).reduced(10, 34);
+    controls.removeFromLeft(gap);
+    auto motion = controls.removeFromLeft(sectionW).reduced(10, 34);
+    controls.removeFromLeft(gap);
+    auto material = controls.removeFromLeft(sectionW).reduced(10, 34);
+    controls.removeFromLeft(gap);
+    auto output = controls.reduced(10, 34);
+
+    auto layoutThree = [this](juce::Rectangle<int> area, KnobWithLabel& a, KnobWithLabel& b, KnobWithLabel& c)
+    {
+        const int w = area.getWidth() / 3;
+        positionControl(a, area.removeFromLeft(w));
+        positionControl(b, area.removeFromLeft(w));
+        positionControl(c, area);
     };
 
-    // Row 1: Degradation (4 knobs left-aligned with character section)
-    int row1Y = 35;
-    int charSpacing = 70;
-    int charStartX = 15;
+    auto layoutTwo = [this](juce::Rectangle<int> area, KnobWithLabel& a, KnobWithLabel& b)
+    {
+        const int w = area.getWidth() / 2;
+        positionControl(a, area.removeFromLeft(w));
+        positionControl(b, area);
+    };
 
-    positionKnob(amountKnob, charStartX, row1Y);
-    positionKnob(damageKnob, charStartX + charSpacing, row1Y);
-    positionKnob(toneKnob, charStartX + charSpacing * 2, row1Y);
-    positionKnob(harshnessKnob, charStartX + charSpacing * 3, row1Y);
+    layoutThree(damage, amountKnob, damageKnob, harshnessKnob);
+    layoutTwo(motion, warbleKnob, ageKnob);
+    layoutThree(material, saturationKnob, noiseKnob, toneKnob);
+    layoutThree(output, loCutKnob, hiCutKnob, dryWetKnob);
+}
 
-    // Row 2: Character (4 knobs) + Output (2 knobs)
-    int row2Y = 148;
+void TapeDeathAudioProcessorEditor::drawSection(juce::Graphics& g, juce::Rectangle<int> bounds,
+                                                const juce::String& title, const juce::String& subtitle)
+{
+    g.setColour(juce::Colour(ink));
+    g.drawRect(bounds, 1);
 
-    // Character section - 4 knobs on left (same alignment as degradation)
-    positionKnob(saturationKnob, charStartX, row2Y);
-    positionKnob(warbleKnob, charStartX + charSpacing, row2Y);
-    positionKnob(noiseKnob, charStartX + charSpacing * 2, row2Y);
-    positionKnob(ageKnob, charStartX + charSpacing * 3, row2Y);
+    auto header = bounds.removeFromTop(30).reduced(10, 0);
+    g.setFont(monoFont(jetBrainsMono, 8.5f));
+    g.drawText(title.toUpperCase(), header, juce::Justification::centredLeft);
 
-    // Output section - 3 knobs on right (with gap from character)
-    int outputSpacing = 70;
-    int outputStartX = 310;
-    positionKnob(loCutKnob, outputStartX, row2Y);
-    positionKnob(hiCutKnob, outputStartX + outputSpacing, row2Y);
-    positionKnob(dryWetKnob, outputStartX + outputSpacing * 2, row2Y);
+    g.setFont(serifFont(instrumentSerifItalic, 13.0f));
+    g.drawText(subtitle, header, juce::Justification::centredRight);
+
+    g.drawLine(static_cast<float>(bounds.getX()), static_cast<float>(bounds.getY()),
+               static_cast<float>(bounds.getRight()), static_cast<float>(bounds.getY()), 1.0f);
+}
+
+void TapeDeathAudioProcessorEditor::positionControl(KnobWithLabel& knob, juce::Rectangle<int> bounds)
+{
+    bounds.reduce(3, 0);
+    const int knobSize = juce::jmin(64, bounds.getWidth());
+    knob.slider.setBounds(bounds.withSizeKeepingCentre(knobSize, knobSize).withY(bounds.getY()));
+    knob.label.setBounds(bounds.withY(knob.slider.getBottom() + 3).withHeight(18));
+    knob.value.setBounds(bounds.withY(knob.label.getBottom() - 1).withHeight(20));
+}
+
+void TapeDeathAudioProcessorEditor::updateReadouts()
+{
+    amountKnob.value.setText(formatParameterValue(amountKnob.paramId), juce::dontSendNotification);
+    damageKnob.value.setText(formatParameterValue(damageKnob.paramId), juce::dontSendNotification);
+    toneKnob.value.setText(formatParameterValue(toneKnob.paramId), juce::dontSendNotification);
+    harshnessKnob.value.setText(formatParameterValue(harshnessKnob.paramId), juce::dontSendNotification);
+    saturationKnob.value.setText(formatParameterValue(saturationKnob.paramId), juce::dontSendNotification);
+    warbleKnob.value.setText(formatParameterValue(warbleKnob.paramId), juce::dontSendNotification);
+    noiseKnob.value.setText(formatParameterValue(noiseKnob.paramId), juce::dontSendNotification);
+    ageKnob.value.setText(formatParameterValue(ageKnob.paramId), juce::dontSendNotification);
+    loCutKnob.value.setText(formatParameterValue(loCutKnob.paramId), juce::dontSendNotification);
+    hiCutKnob.value.setText(formatParameterValue(hiCutKnob.paramId), juce::dontSendNotification);
+    dryWetKnob.value.setText(formatParameterValue(dryWetKnob.paramId), juce::dontSendNotification);
+}
+
+juce::String TapeDeathAudioProcessorEditor::formatParameterValue(const juce::String& paramId) const
+{
+    auto& params = audioProcessor.getParameters();
+    if (auto* parameter = params.getParameter(paramId))
+    {
+        const float normalised = parameter->getValue();
+
+        if (paramId == "loCut")
+            return normalised < 0.08f ? "open" : normalised < 0.45f ? "lifted" : "thin";
+
+        if (paramId == "hiCut")
+            return normalised > 0.92f ? "open" : normalised > 0.55f ? "veiled" : "closed";
+
+        if (paramId == "dryWet")
+            return normalised < 0.18f ? "dry" : normalised < 0.72f ? "parallel" : "printed";
+
+        if (paramId == "tone")
+            return normalised < 0.18f ? "clear" : normalised < 0.6f ? "warmed" : "buried";
+
+        if (paramId == "amount")
+            return normalised < 0.18f ? "none" : normalised < 0.55f ? "some" : normalised < 0.82f ? "many" : "constant";
+
+        if (paramId == "damage")
+            return normalised < 0.18f ? "shallow" : normalised < 0.55f ? "dipped" : normalised < 0.82f ? "deep" : "stuck";
+
+        if (paramId == "harshness")
+            return normalised < 0.18f ? "soft" : normalised < 0.55f ? "firm" : normalised < 0.82f ? "cut" : "chop";
+
+        if (paramId == "warble" || paramId == "age")
+            return normalised < 0.18f ? "still" : normalised < 0.55f ? "loose" : normalised < 0.82f ? "adrift" : "lost";
+
+        if (paramId == "saturation")
+            return normalised < 0.18f ? "clean" : normalised < 0.55f ? "warm" : normalised < 0.82f ? "pushed" : "hot";
+
+        if (paramId == "noise")
+            return normalised < 0.18f ? "quiet" : normalised < 0.55f ? "dust" : normalised < 0.82f ? "hiss" : "static";
+    }
+
+    return {};
+}
+
+void TapeDeathAudioProcessorEditor::MonoPlateLookAndFeel::drawRotarySlider(
+    juce::Graphics& g, int x, int y, int width, int height, float sliderPosProportional,
+    float rotaryStartAngle, float rotaryEndAngle, juce::Slider&)
+{
+    auto bounds = juce::Rectangle<float>(static_cast<float>(x), static_cast<float>(y),
+                                         static_cast<float>(width), static_cast<float>(height)).reduced(3.0f);
+    const auto centre = bounds.getCentre();
+    const float radius = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.42f;
+    const float angle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
+
+    g.setColour(juce::Colour(ink));
+    g.drawEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 1.15f);
+    g.drawEllipse(centre.x - radius * 0.74f, centre.y - radius * 0.74f,
+                  radius * 1.48f, radius * 1.48f, 0.65f);
+
+    for (int i = 0; i <= 10; ++i)
+    {
+        const float t = static_cast<float>(i) / 10.0f;
+        const float tickAngle = rotaryStartAngle + t * (rotaryEndAngle - rotaryStartAngle);
+        const float outer = radius * 1.18f;
+        const float inner = radius * (i % 5 == 0 ? 1.0f : 1.08f);
+        const auto p1 = centre + juce::Point<float>(std::cos(tickAngle) * inner, std::sin(tickAngle) * inner);
+        const auto p2 = centre + juce::Point<float>(std::cos(tickAngle) * outer, std::sin(tickAngle) * outer);
+        g.drawLine({ p1, p2 }, i % 5 == 0 ? 0.9f : 0.55f);
+    }
+
+    const auto indicator = centre + juce::Point<float>(std::cos(angle) * radius * 0.72f,
+                                                       std::sin(angle) * radius * 0.72f);
+    g.drawLine({ centre, indicator }, 2.0f);
+    g.fillEllipse(centre.x - 1.8f, centre.y - 1.8f, 3.6f, 3.6f);
 }

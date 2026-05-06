@@ -32,7 +32,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TapeDeathAudioProcessor::cre
     // DEGRADATION SECTION (4 knobs)
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "amount", "Damage",
+        "amount", "Loss",
         juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 50.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float value, int) { return juce::String(value, 1) + "%"; }));
@@ -50,7 +50,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TapeDeathAudioProcessor::cre
         [](float value, int) { return juce::String(value, 1) + "%"; }));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "harshness", "Violence",
+        "harshness", "Snap",
         juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 20.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float value, int) { return juce::String(value, 1) + "%"; }));
@@ -116,6 +116,10 @@ void TapeDeathAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
 {
     engineLeft.prepare(sampleRate, samplesPerBlock);
     engineRight.prepare(sampleRate, samplesPerBlock);
+
+    dryWetSmoother.reset(sampleRate, 0.05);  // 50ms ramp
+    dryWetSmoother.setCurrentAndTargetValue(dryWetParam->load() / 100.0f);
+
     updateEngineParameters();
 }
 
@@ -147,27 +151,46 @@ void TapeDeathAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
 
     const int numChannels = buffer.getNumChannels();
     const int numSamples = buffer.getNumSamples();
+    const int totalNumInputs = getTotalNumInputChannels();
+    const int totalNumOutputs = getTotalNumOutputChannels();
 
-    float dryWet = dryWetParam->load() / 100.0f;
+    // Clear any output channels not driven by an input channel
+    for (int i = totalNumInputs; i < totalNumOutputs; ++i)
+        buffer.clear(i, 0, numSamples);
+
+    dryWetSmoother.setTargetValue(dryWetParam->load() / 100.0f);
+
+    float* leftData  = numChannels >= 1 ? buffer.getWritePointer(0) : nullptr;
+    float* rightData = numChannels >= 2 ? buffer.getWritePointer(1) : nullptr;
+
+    float blockPeak = 0.0f;
 
     for (int sample = 0; sample < numSamples; ++sample)
     {
-        if (numChannels >= 1)
+        const float dryWet = dryWetSmoother.getNextValue();
+        const float dry = 1.0f - dryWet;
+
+        if (leftData != nullptr)
         {
-            float* leftData = buffer.getWritePointer(0);
             float input = leftData[sample];
+            blockPeak = juce::jmax(blockPeak, std::abs(input));
             float wet = engineLeft.processSample(input);
-            leftData[sample] = input * (1.0f - dryWet) + wet * dryWet;
+            leftData[sample] = input * dry + wet * dryWet;
         }
 
-        if (numChannels >= 2)
+        if (rightData != nullptr)
         {
-            float* rightData = buffer.getWritePointer(1);
             float input = rightData[sample];
+            blockPeak = juce::jmax(blockPeak, std::abs(input));
             float wet = engineRight.processSample(input);
-            rightData[sample] = input * (1.0f - dryWet) + wet * dryWet;
+            rightData[sample] = input * dry + wet * dryWet;
         }
     }
+
+    const float targetActivity = juce::jlimit(0.0f, 1.0f, blockPeak * 2.6f);
+    const float previousActivity = audioActivity.load();
+    const float coefficient = targetActivity > previousActivity ? 0.42f : 0.08f;
+    audioActivity.store(previousActivity + (targetActivity - previousActivity) * coefficient);
 }
 
 void TapeDeathAudioProcessor::updateEngineParameters()
@@ -238,7 +261,8 @@ bool TapeDeathAudioProcessor::isMidiEffect() const
 
 double TapeDeathAudioProcessor::getTailLengthSeconds() const
 {
-    return 0.0;
+    // Up to ~30ms warble delay + dropout-envelope recovery (~1s) + IIR memory.
+    return 2.0;
 }
 
 int TapeDeathAudioProcessor::getNumPrograms()
