@@ -126,4 +126,4 @@ MIT — see `LICENSE`.
 
 ## Credits
 
-Developed by Project Sonaris.
+Developed by Project Sonorous.

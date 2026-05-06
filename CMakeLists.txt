@@ -13,8 +13,8 @@ add_subdirectory(/Users/colton/code/me/plugins/JUCE ${CMAKE_CURRENT_BINARY_DIR}/
 
 # Plugin configuration
 juce_add_plugin(TapeDeath
-    COMPANY_NAME "Project Sonaris"
-    BUNDLE_ID "com.projectsonaris.tapedeath"
+    COMPANY_NAME "Project Sonorous"
+    BUNDLE_ID "com.projectsonorous.tapedeath"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
