@@ -7,10 +7,10 @@ VST3 and Audio Unit, stereo in / stereo out.
 ## Controls
 
 **Degradation**
-- **Damage** — master throttle for dropout amount (0–100%)
+- **Loss** — master throttle for dropout amount (0–100%)
 - **Rot** — dropout severity: how deep each dropout cuts and how long it can stick
 - **Darkness** — tone control / high-frequency loss (20kHz → 500Hz)
-- **Violence** — speed and aggression of dropouts (smooth fade ↔ snappy chops)
+- **Snap** — speed and aggression of dropouts (smooth fade ↔ snappy chops)
 
 **Character**
 - **Saturation** — asymmetric warm-tube + tanh stage, 2× oversampled
