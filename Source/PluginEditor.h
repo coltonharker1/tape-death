@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <sonorous_visual/sonorous_visual.h>
 #include "PluginProcessor.h"
 
 class TapeDeathAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -14,13 +15,10 @@ public:
     void resized() override;
 
 private:
-    class MonoPlateLookAndFeel : public juce::LookAndFeel_V4
-    {
-    public:
-        void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
-                              float sliderPosProportional, float rotaryStartAngle,
-                              float rotaryEndAngle, juce::Slider& slider) override;
-    };
+    // The plugin used to declare its own MonoPlateLookAndFeel here. It now uses
+    // sonorous::SonorousLookAndFeel from sonorous-kit so visual styling stays
+    // consistent across the Project Sonorous instrument line. The member name
+    // below (monoLookAndFeel) is preserved for source compatibility.
 
     struct KnobWithLabel
     {
@@ -32,7 +30,7 @@ private:
     };
 
     TapeDeathAudioProcessor& audioProcessor;
-    MonoPlateLookAndFeel monoLookAndFeel;
+    sonorous::SonorousLookAndFeel monoLookAndFeel;
     juce::Rectangle<int> diagramBounds;
     juce::Typeface::Ptr instrumentSerifRegular;
     juce::Typeface::Ptr instrumentSerifItalic;

@@ -1,13 +1,15 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 
+// Color constants and font helpers are now sourced from sonorous-kit. The
+// local names here are kept (as constexpr forwarders / thin wrappers) so the
+// rest of this file's call sites don't need to change.
 namespace
 {
-constexpr juce::uint32 paper = 0xfff4f1ea;
-constexpr juce::uint32 ink = 0xff000000;
-constexpr juce::uint32 quietInk = 0xaa000000;
-constexpr juce::uint32 faintInk = 0x12000000;
+constexpr juce::uint32 paper    = sonorous::palette::paper;
+constexpr juce::uint32 ink      = sonorous::palette::ink;
+constexpr juce::uint32 quietInk = sonorous::palette::quietInk;
+constexpr juce::uint32 faintInk = sonorous::palette::faintInk;
 
 juce::FontOptions monoFont(juce::Typeface::Ptr typeface, float height)
 {
@@ -23,15 +25,11 @@ juce::FontOptions serifFont(juce::Typeface::Ptr typeface, float height)
 TapeDeathAudioProcessorEditor::TapeDeathAudioProcessorEditor(TapeDeathAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p)
 {
-    instrumentSerifRegular = juce::Typeface::createSystemTypefaceFor(
-        BinaryData::InstrumentSerifRegular_ttf,
-        BinaryData::InstrumentSerifRegular_ttfSize);
-    instrumentSerifItalic = juce::Typeface::createSystemTypefaceFor(
-        BinaryData::InstrumentSerifItalic_ttf,
-        BinaryData::InstrumentSerifItalic_ttfSize);
-    jetBrainsMono = juce::Typeface::createSystemTypefaceFor(
-        BinaryData::JetBrainsMonoRegular_ttf,
-        BinaryData::JetBrainsMonoRegular_ttfSize);
+    // Fonts come from sonorous-kit; the local Ptr members keep their names so
+    // the rest of the editor's monoFont(...)/serifFont(...) calls don't change.
+    instrumentSerifRegular = sonorous::typography::instrumentSerifRegular();
+    instrumentSerifItalic  = sonorous::typography::instrumentSerifItalic();
+    jetBrainsMono          = sonorous::typography::jetBrainsMono();
 
     auto& params = audioProcessor.getParameters();
 
@@ -541,34 +539,6 @@ juce::String TapeDeathAudioProcessorEditor::formatParameterValue(const juce::Str
     return {};
 }
 
-void TapeDeathAudioProcessorEditor::MonoPlateLookAndFeel::drawRotarySlider(
-    juce::Graphics& g, int x, int y, int width, int height, float sliderPosProportional,
-    float rotaryStartAngle, float rotaryEndAngle, juce::Slider&)
-{
-    auto bounds = juce::Rectangle<float>(static_cast<float>(x), static_cast<float>(y),
-                                         static_cast<float>(width), static_cast<float>(height)).reduced(3.0f);
-    const auto centre = bounds.getCentre();
-    const float radius = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.42f;
-    const float angle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
-
-    g.setColour(juce::Colour(ink));
-    g.drawEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 1.15f);
-    g.drawEllipse(centre.x - radius * 0.74f, centre.y - radius * 0.74f,
-                  radius * 1.48f, radius * 1.48f, 0.65f);
-
-    for (int i = 0; i <= 10; ++i)
-    {
-        const float t = static_cast<float>(i) / 10.0f;
-        const float tickAngle = rotaryStartAngle + t * (rotaryEndAngle - rotaryStartAngle);
-        const float outer = radius * 1.18f;
-        const float inner = radius * (i % 5 == 0 ? 1.0f : 1.08f);
-        const auto p1 = centre + juce::Point<float>(std::cos(tickAngle) * inner, std::sin(tickAngle) * inner);
-        const auto p2 = centre + juce::Point<float>(std::cos(tickAngle) * outer, std::sin(tickAngle) * outer);
-        g.drawLine({ p1, p2 }, i % 5 == 0 ? 0.9f : 0.55f);
-    }
-
-    const auto indicator = centre + juce::Point<float>(std::cos(angle) * radius * 0.72f,
-                                                       std::sin(angle) * radius * 0.72f);
-    g.drawLine({ centre, indicator }, 2.0f);
-    g.fillEllipse(centre.x - 1.8f, centre.y - 1.8f, 3.6f, 3.6f);
-}
+// MonoPlateLookAndFeel::drawRotarySlider was moved into sonorous_visual's
+// SonorousLookAndFeel. The editor's monoLookAndFeel member is now a
+// SonorousLookAndFeel instance, so the rotary draw routine comes from the kit.
